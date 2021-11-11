@@ -6,51 +6,37 @@ import (
 	"PanIndex/entity"
 	"PanIndex/model"
 	"errors"
-	"github.com/bluele/gcache"
-	"github.com/libsgh/nic"
 	"github.com/robfig/cron"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"time"
 )
 
+var CacheCron *cron.Cron
+
+func AutoCacheRun() {
+	CacheCron = cron.New()
+	accounts := []entity.Account{}
+	model.SqliteDb.Raw("select * from account where mode !=?", "native").Find(&accounts)
+	for _, ac := range accounts {
+		if ac.SyncCron != "" {
+			CacheCron.AddFunc(ac.SyncCron, func() {
+				SyncOneAccount(ac)
+			})
+		}
+	}
+	CacheCron.Start()
+}
 func Run() {
 	c := cron.New()
-	if config.GloablConfig.HerokuKeepAlive != "" {
-		c.AddFunc(config.GloablConfig.HerokuKeepAlive, func() {
-			if config.GloablConfig.HerokuAppUrl != "" && config.GloablConfig.HerokuKeepAlive != "" {
-				resp, err := nic.Get(config.GloablConfig.HerokuAppUrl, nil)
-				if err != nil {
-					log.Infoln(err.Error())
-				} else {
-					log.Infoln("[定时任务]heroku防休眠 >> " + resp.Status)
-				}
-			}
-		})
-	}
-	if config.GloablConfig.RefreshCookie != "" {
-		c.AddFunc(config.GloablConfig.RefreshCookie, func() {
-			if config.GloablConfig.HerokuAppUrl != "" {
-				resp, err := nic.Get(config.GloablConfig.HerokuAppUrl+"/api/admin/envToConfig?token="+config.GloablConfig.ApiToken, nil)
-				if err != nil {
-					log.Infoln(err.Error())
-				} else {
-					log.Infoln("[定时任务]heroku配置防丢失 >> " + resp.Status)
-				}
-			}
-			for _, account := range SelectAllAccounts() {
-				AccountLogin(account)
-			}
-		})
-	}
-	if config.GloablConfig.UpdateFolderCache != "" {
+	/*if config.GloablConfig.UpdateFolderCache != "" {
 		c.AddFunc(config.GloablConfig.UpdateFolderCache, func() {
 			Util.GC = gcache.New(10).LRU().Build()
 			for _, account := range SelectAllAccounts() {
 				SyncOneAccount(account)
 			}
 		})
-	}
+	}*/
 	//阿里云盘 accesstoken过期时间为2小时，这里采取固定cron刷新的方式
 	c.AddFunc("0 0 0/1 * * ?", func() {
 		for k, v := range Util.Alis {
@@ -182,19 +168,16 @@ func SyncOneAccount(account entity.Account) {
 	}
 	model.SqliteDb.Table("account").Where("id=?", account.Id).Update("status", -1)
 	if account.Mode == "cloud189" {
-		if syncDir == "/" {
-			syncDir = ""
-		}
-		Util.Cloud189GetFiles(account.Id, fileId, fileId, syncDir, syncChild)
+		Util.Cloud189GetFiles(account.Id, fileId, fileId, syncDir, 0, 0, syncChild)
 	} else if account.Mode == "teambition" {
 		rootId := Util.ProjectIdCheck("www", account.Id, account.RootId)
 		if Util.TeambitionSessions[account.Id].IsPorject {
 			if syncDir == "/" {
 				fileId = rootId
 			}
-			Util.TeambitionGetProjectFiles("www", account.Id, fileId, syncDir, syncChild)
+			Util.TeambitionGetProjectFiles("www", account.Id, fileId, syncDir, 0, 0, syncChild)
 		} else {
-			Util.TeambitionGetFiles(account.Id, account.RootId, fileId, syncDir, syncChild)
+			Util.TeambitionGetFiles(account.Id, account.RootId, fileId, syncDir, 0, 0, syncChild)
 		}
 	} else if account.Mode == "teambition-us" {
 		rootId := Util.ProjectIdCheck("us", account.Id, account.RootId)
@@ -202,17 +185,17 @@ func SyncOneAccount(account entity.Account) {
 			if syncDir == "/" {
 				fileId = rootId
 			}
-			Util.TeambitionGetProjectFiles("us", account.Id, fileId, syncDir, syncChild)
+			Util.TeambitionGetProjectFiles("us", account.Id, fileId, syncDir, 0, 0, syncChild)
 		} else {
 		}
 	} else if account.Mode == "aliyundrive" {
 		cookie := Util.AliRefreshToken(account)
 		model.SqliteDb.Table("account").Where("id=?", account.Id).Update("refresh_token", cookie)
-		Util.AliGetFiles(account.Id, account.RootId, fileId, syncDir, syncChild)
+		Util.AliGetFiles(account.Id, account.RootId, fileId, syncDir, 0, 0, syncChild)
 	} else if account.Mode == "onedrive" {
 		cookie := Util.OneDriveRefreshToken(account)
 		model.SqliteDb.Table("account").Where("id=?", account.Id).Update("refresh_token", cookie)
-		Util.OndriveGetFiles("", account.Id, fileId, syncDir, syncChild)
+		Util.OndriveGetFiles("", account.Id, fileId, syncDir, 0, 0, syncChild)
 	} else if account.Mode == "native" {
 	}
 	var fileNodeCount int64

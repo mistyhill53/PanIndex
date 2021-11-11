@@ -5,6 +5,26 @@ var clipboard = new ClipboardJS('.copyBtn', {
         return encodeURI(fullUrl);
     }
 });
+var copyAllLinksBoard = new ClipboardJS('#copyAllLinks', {
+    text: function(trigger) {
+        var urls = [];
+        $(".icon-file-mdui").each(function (i, item) {
+            var folder = $(this).attr("data-folder");
+            var path = $(this).attr("data-url");
+            var fullUrl = window.location.protocol + "//"+window.location.host + path;
+            if(folder == "false"){
+                urls.push(fullUrl);
+            }
+        });
+        return urls.join("\n");
+    }
+});
+copyAllLinksBoard.on('success', function(e) {
+    mdui.snackbar({
+        message: "链接已复制到剪切板"
+    });
+    e.clearSelection();
+});
 clipboard.on('success', function(e) {
     if(typeof(mdui) != "undefined"){
         mdui.snackbar({
@@ -22,8 +42,15 @@ clipboard.on('success', function(e) {
 $('.icon-file-mdui').on('click', function(ev) {
     if(ev.target.tagName == "A" && (ev.target.text == "file_download" ||
         ev.target.text == "content_copy") || ev.target.title == "复制链接") return;
+    var isFolder = $(this).attr("data-folder");
     var dURL = $(this).attr("data-url");
-    window.location.href = dURL+"?v";
+    if(isFolder == "true" ){
+        window.location.href = dURL;
+    }else{
+        window.location.href = dURL+"?v";
+    }
+
+
 });
 $(document).ready(function() {
     $('#theme-toggle').on('click', function(){
@@ -31,13 +58,40 @@ $(document).ready(function() {
         if($('body').hasClass('mdui-theme-layout-dark')){
             $('body').removeClass('mdui-theme-layout-dark');
             $('#theme-toggle i').text('brightness_4');
-            $.cookie("Theme", "mdui-light");
+            $.cookie("Theme", "mdui-light", {expires : 3650, path:"/"});
         }else{
             $('body').addClass('mdui-theme-layout-dark');
             $('#theme-toggle i').text('brightness_5');
-            $.cookie("Theme", "mdui-dark");
+            $.cookie("Theme", "mdui-dark", {expires : 3650, path:"/"});
         }
     });
+    $("#image-preview-list").empty();
+    $(".icon-file-mdui").each(function (i, item) {
+        var mt = $(this).attr("data-media-type");
+        var du = $(this).attr("data-url");
+        var t = $(this).attr("data-title");
+        if(mt == 1){
+            $("#image-preview-list").append("<img data-original=\""+du+"\" alt=\""+t+"\"></img>");
+        }
+    });
+    $('#go-to-top').on('click',function () {
+        $("html, body").animate({ scrollTop: 0 }, "slow");
+        return false;
+    });
+    $('.sort-order-check').on('click', function () {
+        var dOrder =  $(this).attr("data-order");
+        var dColumn =  $(this).attr("data-column");
+        $.cookie("SColumn", dColumn, {expires : 3650, path:"/"});
+        $.cookie("SOrder", dOrder, {expires : 3650, path:"/"});
+        location.reload();
+    });
+    $('.default-check').on('click', function () {
+        $.cookie('SColumn', "default", {expires : 3650, path: '/'});
+        $.cookie('SOrder', null, {expires : 3650, path: '/'});
+        location.reload();
+    });
+    //初始化排序设置
+    initSort();
     $('.icon-file').on('click', function(ev) {
         if(ev.target.tagName == "A" && (ev.target.text == "file_download" ||
             ev.target.text == "content_copy") || ev.target.title == "复制链接") return;
@@ -128,6 +182,40 @@ $(document).ready(function() {
             $(this).html(orderColumn+" <i class=\"fa fa-angle-double-down\" aria-hidden=\"true\"></i>");
         }
     });
+    if(document.getElementById('share-menu')){
+        document.getElementById('share-menu').addEventListener('open.mdui.menu', function () {
+            var formData = new FormData();
+            var prefix = window.location.protocol + "//"+window.location.host + "/s/";
+            formData.append("accountId", $(this).attr("data-aid"));
+            formData.append("prefix", prefix);
+            formData.append("path", $(this).attr("data-fp"));
+            $.ajax({
+                type: 'POST',
+                url: '/api/public/shortInfo',
+                data: formData,
+                cache: false,
+                contentType: false,
+                processData: false,
+                success: function(d){
+                    $("#qrcode").attr("src", d.qr_code);
+                    $("#copyShortUrl").attr("data-content", d.short_url);
+                    $("#copyShortUrl").attr("data-clipboard-action", "copy");
+                    var clipboard = new ClipboardJS('#copyShortUrl', {
+                        text: function(trigger) {
+                            var content = $(trigger).data("content");
+                            return content;
+                        }
+                    });
+                    clipboard.on('success', function(e) {
+                        mdui.snackbar({
+                            message: "已复制到剪切板"
+                        });
+                        e.clearSelection();
+                    });
+                }
+            });
+        });
+    }
 });
 function sortTable(sort_order, data_type){
     $('table tbody > tr').not('.parent').sortElements(function (a, b) {
@@ -256,7 +344,7 @@ $(".search").bind('keydown', function(event) {
     key = key.replace(/(^\s*)|(\s*$)/g,"")
     if (event.key === "Enter") {
         if( $(this).val() != ""){
-            window.location.href = dIndex + "?search=" + key;
+            window.location.href = "/?search=" + key;
         }else{
             window.location.href = dIndex;
         }
@@ -274,3 +362,65 @@ $(".search").bind('keydown', function(event) {
         }
     });
 });*/
+function initSort(){
+    var sColumn = $.cookie("SColumn");
+    var sOrder = $.cookie("SOrder");
+    if (sColumn == "null" || sColumn == null || sColumn == "" || sColumn == "default"){
+        $('.default-check').prepend('<i class="check mdui-menu-item-icon mdui-icon material-icons">check</i>');
+    }else{
+        $('a[data-column='+sColumn+']:not(.sort-order-check)').prepend('<i class="check mdui-menu-item-icon mdui-icon material-icons">check</i>');
+        $('a[data-column='+sColumn+'][data-order='+sOrder+']').prepend('<i class="check mdui-menu-item-icon mdui-icon material-icons">check</i>');
+    }
+}
+
+window.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('previewImages').addEventListener('click', function () {
+        var ipl = $('#image-preview-list').html();
+        if(ipl.length != 0){
+            var viewer = new Viewer(document.getElementById('image-preview-list'), {
+                url: 'data-original',
+                hidden: function () {
+                    viewer.destroy();
+                },
+                title: function (image) {
+                    return image.alt + ' (' + (this.index + 1) + '/' + this.length + ')';
+                }
+            });
+            viewer.show();
+        }
+    });
+});
+function promptPwd(path){
+    if(path == "/"){
+        path = "/d_0";
+    }else{
+        if(path.endWith("/")){
+            path = path.substring(0,path.Length-1);
+
+        }
+    }
+    var ppwd = path + ":" + $("#input-password").val();
+    if ($.cookie("dir_pwd") != null){
+        var value = $.cookie("dir_pwd") + ","+ ppwd;
+        $.cookie("dir_pwd", value, {expires : 3650, path:"/"});
+    }else{
+        $.cookie("dir_pwd", ppwd, {expires : 3650, path:"/"});
+    }
+    location.reload();
+}
+$("#input-password").bind('keydown', function(event) {
+    if (event.key === "Enter") {
+        var path = $(this).attr("data-path");
+        promptPwd(path);
+    }
+});
+String.prototype.endWith = function (param) {
+    if (param == null || param == "" || this.length == 0 || param.length > this.length) {
+        return false;
+    }
+    if (this.substring(this.length - param.length) == param) {
+        return true;
+    } else {
+        return false;
+    }
+}

@@ -46,7 +46,7 @@ func AliRefreshToken(account entity.Account) string {
 	return tokenResp.RefreshToken
 }
 
-func AliGetFiles(accountId, rootId, fileId, p string, syncChild bool) {
+func AliGetFiles(accountId, rootId, fileId, p string, hide, hasPwd int, syncChild bool) {
 	tokenResp := Alis[accountId]
 	auth := tokenResp.TokenType + " " + tokenResp.AccessToken
 	defer func() {
@@ -132,12 +132,29 @@ func AliGetFiles(accountId, rootId, fileId, p string, syncChild bool) {
 			fn.IsStarred = item["starred"].(bool)
 			fn.ParentId = item["parent_file_id"].(string)
 			fn.Hide = 0
-			if config.GloablConfig.HideFileId != "" {
-				listSTring := strings.Split(config.GloablConfig.HideFileId, ",")
-				sort.Strings(listSTring)
-				i := sort.SearchStrings(listSTring, fn.FileId)
-				if i < len(listSTring) && listSTring[i] == fn.FileId {
-					fn.Hide = 1
+			fn.HasPwd = 0
+			if hide == 1 {
+				fn.Hide = hide
+			} else {
+				if config.GloablConfig.HideFileId != "" {
+					listSTring := strings.Split(config.GloablConfig.HideFileId, ",")
+					sort.Strings(listSTring)
+					i := sort.SearchStrings(listSTring, fn.FileId)
+					if i < len(listSTring) && listSTring[i] == fn.FileId {
+						fn.Hide = 1
+					}
+				}
+			}
+			if hasPwd == 1 {
+				fn.HasPwd = hasPwd
+			} else {
+				if config.GloablConfig.PwdDirId != "" {
+					listSTring := strings.Split(config.GloablConfig.PwdDirId, ",")
+					sort.Strings(listSTring)
+					i := sort.SearchStrings(listSTring, fn.FileId)
+					if i < len(listSTring) && strings.Split(listSTring[i], ":")[0] == fn.FileId {
+						fn.HasPwd = 1
+					}
 				}
 			}
 			fn.ParentPath = p
@@ -148,7 +165,7 @@ func AliGetFiles(accountId, rootId, fileId, p string, syncChild bool) {
 			}
 			if fn.IsFolder == true {
 				if syncChild {
-					AliGetFiles(accountId, rootId, fn.FileId, fn.Path, syncChild)
+					AliGetFiles(accountId, rootId, fn.FileId, fn.Path, fn.Hide, fn.HasPwd, syncChild)
 				}
 			}
 			fn.Id = uuid.NewV4().String()
@@ -183,6 +200,35 @@ func AliGetDownloadUrl(accountId, fileId string) string {
 	}
 	if speedLimit != -1 {
 		log.Warningf("该文件限速：%d", speedLimit)
+	}
+	return downUrl
+}
+
+func AliFolderDownload(accountId, fileId, archiveName, ua string) string {
+	tokenResp := Alis[accountId]
+	auth := tokenResp.TokenType + " " + tokenResp.AccessToken
+	resp, err := nic.Post("https://api.aliyundrive.com/adrive/v1/file/multiDownloadUrl", nic.H{
+		Headers: nic.KV{
+			"authorization": auth,
+			"User-Agent":    ua,
+		},
+		JSON: nic.KV{
+			"download_infos": []nic.KV{nic.KV{
+				"drive_id": tokenResp.DefaultDriveId,
+				"files": []nic.KV{nic.KV{
+					"file_id": fileId,
+				}},
+			},
+			},
+			"archive_name": archiveName,
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	downUrl := jsoniter.Get(resp.Bytes, "download_url").ToString()
+	if downUrl == "" {
+		log.Warningln("阿里云盘下载地址获取失败")
 	}
 	return downUrl
 }
@@ -250,4 +296,22 @@ func AliUpload(accountId, parentId string, files []*multipart.FileHeader) bool {
 		log.Debugf("文件：%s，上传成功，耗时：%s", file.Filename, ShortDur(time.Now().Sub(t1)))
 	}
 	return true
+}
+
+//阿里云转码
+func AliTranscoding(accountId, fileId string) string {
+	tokenResp := Alis[accountId]
+	auth := tokenResp.TokenType + " " + tokenResp.AccessToken
+	resp, _ := nic.Post("https://api.aliyundrive.com/v2/file/get_video_preview_play_info", nic.H{
+		Headers: nic.KV{
+			"authorization": auth,
+		},
+		JSON: nic.KV{
+			"category":    "live_transcoding",
+			"drive_id":    tokenResp.DefaultDriveId,
+			"file_id":     fileId,
+			"template_id": "",
+		},
+	})
+	return resp.Text
 }
